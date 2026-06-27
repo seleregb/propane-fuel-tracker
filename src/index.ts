@@ -129,7 +129,7 @@ async function main() {
     fs.mkdirSync(artifactsDir, { recursive: true });
     const screenshotPath = path.join(artifactsDir, `screenshot-${Date.now()}.png`);
 
-    const browser = await chromium.launch({ headless: false });
+    const browser = await chromium.launch({ headless: true });
     const page = await (await browser.newContext()).newPage();
 
     await page.goto(siteUrl, { waitUntil: 'load', timeout: 60000 });
