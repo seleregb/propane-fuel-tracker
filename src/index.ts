@@ -1,62 +1,72 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import nodemailer from 'nodemailer';
+import sgMail from '@sendgrid/mail';
 import { chromium } from 'playwright';
 
-dotenv.config();
+const envCandidates = [
+  path.resolve(__dirname, '..', '.env'),
+  path.resolve(process.cwd(), '.env')
+];
+
+for (const envPath of envCandidates) {
+  dotenv.config({ path: envPath });
+}
 
 const {
   SITE_URL,
   USERNAME,
   PASSWORD,
   ACCOUNT_URL,
+  LOGIN_USERNAME_SELECTOR,
+  LOGIN_PASSWORD_SELECTOR,
+  LOGIN_SUBMIT_SELECTOR,
   TANK_LEVEL_SELECTOR,
   TANK_THRESHOLD,
   REFILL_BUTTON_SELECTOR,
   REFILL_CONFIRM_SELECTOR,
-
-  SMTP_HOST,
-  SMTP_PORT,
-  SMTP_USER,
-  SMTP_PASS,
+  SENDGRID_API_KEY,
+  SENDGRID_FROM,
   EMAIL_TO
 } = process.env;
 
-function required(name: string, val: any) {
-  if (!val) {
+function required(name: string, val: string | undefined) {
+  const normalized = val?.trim();
+  if (!normalized) {
     throw new Error(`Missing required env var: ${name}`);
   }
+  return normalized;
 }
 
 async function sendEmail(subject: string, text: string, attachments: { filename: string; path: string }[] = []) {
-  const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: SMTP_PORT ? parseInt(SMTP_PORT, 10) : 587,
-    secure: false,
-    auth: SMTP_USER && SMTP_PASS ? { user: SMTP_USER, pass: SMTP_PASS } : undefined
-  } as any);
+  sgMail.setApiKey(required('SENDGRID_API_KEY', SENDGRID_API_KEY));
 
-  await transporter.sendMail({
-    from: SMTP_USER,
-    to: EMAIL_TO,
+  const formattedAttachments = attachments.map(({ filename, path: filePath }) => ({
+    content: fs.readFileSync(filePath).toString('base64'),
+    filename,
+    type: 'application/octet-stream',
+    disposition: 'attachment'
+  }));
+
+  await sgMail.send({
+    to: required('EMAIL_TO', EMAIL_TO),
+    from: required('SENDGRID_FROM', SENDGRID_FROM),
     subject,
     text,
-    attachments
+    attachments: formattedAttachments
   });
 }
 
 async function main() {
   try {
-    required('SITE_URL', SITE_URL);
-    required('USERNAME', USERNAME);
-    required('PASSWORD', PASSWORD);
-    required('TANK_THRESHOLD', TANK_THRESHOLD);
-    required('SMTP_HOST', SMTP_HOST);
-    required('SMTP_PORT', SMTP_PORT);
-    required('SMTP_USER', SMTP_USER);
-    required('SMTP_PASS', SMTP_PASS);
-    required('EMAIL_TO', EMAIL_TO);
+    const siteUrl = required('SITE_URL', SITE_URL);
+    const username = required('USERNAME', USERNAME);
+    const password = required('PASSWORD', PASSWORD);
+    const loginUsernameSelector = required('LOGIN_USERNAME_SELECTOR', LOGIN_USERNAME_SELECTOR);
+    const loginPasswordSelector = required('LOGIN_PASSWORD_SELECTOR', LOGIN_PASSWORD_SELECTOR);
+    const loginSubmitSelector = required('LOGIN_SUBMIT_SELECTOR', LOGIN_SUBMIT_SELECTOR);
+    const tankLevelSelector = required('TANK_LEVEL_SELECTOR', TANK_LEVEL_SELECTOR);
+    const tankThreshold = required('TANK_THRESHOLD', TANK_THRESHOLD);
 
     const artifactsDir = path.resolve(process.cwd(), 'artifacts');
     fs.mkdirSync(artifactsDir, { recursive: true });
@@ -65,49 +75,45 @@ async function main() {
     const browser = await chromium.launch({ headless: true });
     const page = await (await browser.newContext()).newPage();
 
-    await page.goto(SITE_URL!, { waitUntil: 'load', timeout: 60000 });
+    await page.goto(siteUrl, { waitUntil: 'load', timeout: 60000 });
 
-    await page.locator('#email_check').fill(USERNAME!);
-    await page.locator('#password_check').fill(PASSWORD!);
+    await page.locator(loginUsernameSelector).fill(username);
+    await page.locator(loginPasswordSelector).fill(password);
     await Promise.all([
-      page.locator('#cmdLogin').click(),
+      page.locator(loginSubmitSelector).click(),
       page.waitForLoadState('networkidle')
     ]);
 
-    // Navigate to account page if provided
     if (ACCOUNT_URL) {
       await page.goto(ACCOUNT_URL, { waitUntil: 'load', timeout: 60000 });
     }
 
-    // Take a screenshot of account page
     await page.screenshot({ path: screenshotPath, fullPage: true });
 
-    await page.getByRole('link', { name: 'Open Tanks Page' }).click();
-    await page.getByRole('tab', { name: 'Tank 2' }).click();
+    await page.getByRole('link', { name: 'Open Tanks Page', exact: true }).click();
 
-    // Read tank level
-    const raw = await page.textContent(TANK_LEVEL_SELECTOR!);
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+
+    await page.getByRole('tab', { name: 'Tank 2', exact: true }).click();
+
+    await page.screenshot({ path: screenshotPath, fullPage: true });
+
+    const raw = await page.textContent(tankLevelSelector);
     if (!raw) throw new Error('Could not read tank level from selector');
 
-    // Attempt to parse number from text (support percentage formats like "42%" or "42 %")
     const normalized = raw.replace(',', '.');
     const pctMatch = normalized.match(/(\d+(?:\.\d+)?)\s*%/);
     const numMatch = pctMatch ? pctMatch : normalized.match(/(\d+(?:\.\d+)?)/);
     if (!numMatch) throw new Error(`Could not parse number from tank text: "${raw}"`);
     const level = parseFloat((numMatch[1] ?? numMatch[0]) as string);
-    const threshold = parseFloat(TANK_THRESHOLD!);
+    const threshold = parseFloat(tankThreshold);
 
-    let message = `Tank level parsed: ${level} (threshold ${threshold})`;
+    const message = `Tank level parsed: ${level} (threshold ${threshold})`;
     console.log(message);
 
     if (level <= threshold) {
-      // Try to request refill if selector supplied
       if (REFILL_BUTTON_SELECTOR) {
         await page.click(REFILL_BUTTON_SELECTOR);
-        // if (REFILL_CONFIRM_SELECTOR) {
-        //   await page.waitForSelector(REFILL_CONFIRM_SELECTOR, { timeout: 15000 });
-        // }
-        // take another screenshot after request
         const screenshotAfter = path.join(artifactsDir, `screenshot-after-${Date.now()}.png`);
         await page.screenshot({ path: screenshotAfter, fullPage: true });
         await browser.close();
@@ -140,16 +146,14 @@ async function main() {
       const artifactsDir = path.resolve(process.cwd(), 'artifacts');
       fs.mkdirSync(artifactsDir, { recursive: true });
       const screenshotPath = path.join(artifactsDir, `error-screenshot-${Date.now()}.png`);
-      // Attempt to capture a screenshot if Playwright is available in error path
       try {
-        // dynamic import to avoid exceptions when not available
         const pw = await import('playwright');
         const browser = await pw.chromium.launch({ headless: true });
         const page = await (await browser.newContext()).newPage();
         if (SITE_URL) await page.goto(SITE_URL, { waitUntil: 'load', timeout: 15000 });
         await page.screenshot({ path: screenshotPath, fullPage: true });
         await browser.close();
-      } catch (e) {
+      } catch {
         // ignore screenshot on error
       }
 
