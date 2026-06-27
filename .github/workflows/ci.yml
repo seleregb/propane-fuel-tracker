@@ -1,0 +1,56 @@
+name: Propane Tracker CI
+
+on:
+  push:
+  workflow_dispatch:
+  schedule:
+    - cron: '0 6 * * *' # run daily at 06:00 UTC (adjust as desired)
+
+jobs:
+  check-and-refill:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Use Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Build
+        run: npm run build
+
+      - name: Run checker
+        env:
+          SITE_URL: ${{ secrets.SITE_URL }}
+          ACCOUNT_URL: ${{ secrets.ACCOUNT_URL }}
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          LOGIN_USERNAME_SELECTOR: ${{ secrets.LOGIN_USERNAME_SELECTOR }}
+          LOGIN_PASSWORD_SELECTOR: ${{ secrets.LOGIN_PASSWORD_SELECTOR }}
+          LOGIN_SUBMIT_SELECTOR: ${{ secrets.LOGIN_SUBMIT_SELECTOR }}
+          TANK_LEVEL_SELECTOR: ${{ secrets.TANK_LEVEL_SELECTOR }}
+          TANK_THRESHOLD: ${{ secrets.TANK_THRESHOLD }}
+          REFILL_BUTTON_SELECTOR: ${{ secrets.REFILL_BUTTON_SELECTOR }}
+          REFILL_CONFIRM_SELECTOR: ${{ secrets.REFILL_CONFIRM_SELECTOR }}
+
+          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
+          SENDGRID_FROM: ${{ secrets.SENDGRID_FROM }}
+          EMAIL_TO: ${{ secrets.EMAIL_TO }}
+
+        run: |
+          set -e
+          npm run ci
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: propane-artifacts
+          path: artifacts/**
