@@ -4,7 +4,7 @@ on:
   push:
   workflow_dispatch:
   schedule:
-    - cron: '0 6 * * *' # run daily at 06:00 UTC (adjust as desired)
+    - cron: '0 6 */3 * *' # run every 3 days at 06:00 UTC (adjust as desired)
 
 jobs:
   check-and-refill:
