@@ -2,7 +2,8 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import sgMail from '@sendgrid/mail';
-import { chromium } from 'playwright';
+import { chromium, Locator } from 'playwright';
+import { expect } from 'playwright/test';
 
 const envCandidates = [
   path.resolve(__dirname, '..', '.env'),
@@ -57,6 +58,62 @@ async function sendEmail(subject: string, text: string, attachments: { filename:
   });
 }
 
+function extractSnippet(source: string, marker: string): string {
+  const index = source.indexOf(marker);
+  if (index === -1) {
+    return source.slice(0, 500);
+  }
+
+  const start = Math.max(0, index - 250);
+  const end = Math.min(source.length, index + 1000);
+  return source.slice(start, end);
+}
+
+async function readTankLevel(page: any, selector: string, responseText?: string): Promise<number> {
+  await page.waitForFunction((targetSelector: string) => {
+    const hiddenInput = document.querySelector('input[name="tank_gauge_percent"]') as HTMLInputElement | null;
+    if (hiddenInput?.value && hiddenInput.value.trim() !== '') {
+      return true;
+    }
+
+    const summary = document.querySelector('#tank_gauge_summary');
+    if (summary?.textContent?.match(/\d+(?:\.\d+)?\s*%/i)) {
+      return true;
+    }
+
+    const fallback = document.querySelector(targetSelector);
+    return !!(fallback?.textContent?.match(/\d+(?:\.\d+)?\s*%/i));
+  }, selector, { timeout: 60000 });
+
+  const html = await page.content();
+  const sources = [html, responseText].filter((value): value is string => Boolean(value));
+
+  for (const source of sources) {
+    const hiddenInputMatch = source.match(/name=["']tank_gauge_percent["'][^>]*value=["'](\d+(?:\.\d+)?)["']/i);
+    if (hiddenInputMatch) {
+      return parseFloat(hiddenInputMatch[1]);
+    }
+
+    const summaryMatch = source.match(/Percent in tank:\s*(\d+(?:\.\d+)?)\s*%/i);
+    if (summaryMatch) {
+      return parseFloat(summaryMatch[1]);
+    }
+
+    const genericMatch = source.match(/(\d+(?:\.\d+)?)\s*%/i);
+    if (genericMatch) {
+      return parseFloat(genericMatch[1]);
+    }
+  }
+
+  console.log('Tank gauge debug:');
+  console.log('HTML snippet:', extractSnippet(html, 'tank_gauge'));
+  if (responseText) {
+    console.log('Response snippet:', extractSnippet(responseText, 'tank_gauge'));
+  }
+
+  throw new Error(`Could not find a percentage in tank text for selector: ${selector}`);
+}
+
 async function main() {
   try {
     const siteUrl = required('SITE_URL', SITE_URL);
@@ -72,7 +129,7 @@ async function main() {
     fs.mkdirSync(artifactsDir, { recursive: true });
     const screenshotPath = path.join(artifactsDir, `screenshot-${Date.now()}.png`);
 
-    const browser = await chromium.launch({ headless: true });
+    const browser = await chromium.launch({ headless: false });
     const page = await (await browser.newContext()).newPage();
 
     await page.goto(siteUrl, { waitUntil: 'load', timeout: 60000 });
@@ -90,49 +147,43 @@ async function main() {
 
     await page.screenshot({ path: screenshotPath, fullPage: true });
 
-    await page.getByRole('link', { name: 'Open Tanks Page', exact: true }).click();
+    const dropdown = page.locator('select#loc_selector');
+    await dropdown.waitFor({ state: 'visible', timeout: 60000 });
 
+    const tankResponsePromise = page.waitForResponse(
+      (response) => response.url().includes('/user-home') && response.request().method() === 'POST',
+      { timeout: 60000 }
+    ).catch(() => undefined);
+
+    await dropdown.selectOption({ label: '2' });
+    await page.waitForLoadState('networkidle', { timeout: 300000 });
+    // await page.waitForSelector('#tank_guage', { state: 'visible', timeout: 60000 });
     await page.screenshot({ path: screenshotPath, fullPage: true });
 
-    await page.getByRole('tab', { name: 'Tank 2', exact: true }).click();
+    const tankResponse = await tankResponsePromise;
+    let responseText: string | undefined;
+    if (tankResponse) {
+      responseText = await tankResponse.text();
+    }
 
-    await page.screenshot({ path: screenshotPath, fullPage: true });
-
-    const raw = await page.textContent(tankLevelSelector);
-    if (!raw) throw new Error('Could not read tank level from selector');
-
-    const normalized = raw.replace(',', '.');
-    const pctMatch = normalized.match(/(\d+(?:\.\d+)?)\s*%/);
-    const numMatch = pctMatch ? pctMatch : normalized.match(/(\d+(?:\.\d+)?)/);
-    if (!numMatch) throw new Error(`Could not parse number from tank text: "${raw}"`);
-    const level = parseFloat((numMatch[1] ?? numMatch[0]) as string);
+    const level = await readTankLevel(page, tankLevelSelector, responseText);
     const threshold = parseFloat(tankThreshold);
 
     const message = `Tank level parsed: ${level} (threshold ${threshold})`;
     console.log(message);
 
     if (level <= threshold) {
-      if (REFILL_BUTTON_SELECTOR) {
-        await page.click(REFILL_BUTTON_SELECTOR);
-        const screenshotAfter = path.join(artifactsDir, `screenshot-after-${Date.now()}.png`);
-        await page.screenshot({ path: screenshotAfter, fullPage: true });
-        await browser.close();
+      const screenshotAfter = path.join(artifactsDir, `screenshot-after-${Date.now()}.png`);
+      await page.screenshot({ path: screenshotAfter, fullPage: true });
+      await browser.close();
 
-        await sendEmail('Propane refill requested', `A refill was requested automatically. ${message}\n\nSee attachments.`, [
-          { filename: 'account-before.png', path: screenshotPath },
-          { filename: 'account-after.png', path: screenshotAfter }
-        ]);
+      await sendEmail('Propane account update', `Please refill your propane tank. ${message}\n\nSee attachments.`, [
+        { filename: 'account-before.png', path: screenshotPath },
+        { filename: 'account-after.png', path: screenshotAfter }
+      ]);
 
-        console.log('Refill requested and email sent.');
-        process.exit(0);
-      } else {
-        await browser.close();
-        await sendEmail('Propane refill NEEDED (manual)', `Tank level ${level} is below threshold ${threshold} but REFILL_BUTTON_SELECTOR is not configured. Please request refill manually.`, [
-          { filename: 'account.png', path: screenshotPath }
-        ]);
-        console.log('Threshold reached; emailed manual action.');
-        process.exit(0);
-      }
+      console.log('Level below threshold; email sent.');
+      process.exit(0);
     } else {
       await browser.close();
       await sendEmail('Propane account check - level OK', `Tank level ${level} is above threshold ${threshold}.`, [
