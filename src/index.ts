@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import sgMail from '@sendgrid/mail';
+import { MailerSend, EmailParams, Sender, Recipient, Attachment } from "mailersend";
 import { chromium, Locator } from 'playwright';
 import { expect } from 'playwright/test';
 
@@ -26,8 +26,8 @@ const {
   TANK_THRESHOLD,
   REFILL_BUTTON_SELECTOR,
   REFILL_CONFIRM_SELECTOR,
-  SENDGRID_API_KEY,
-  SENDGRID_FROM,
+  MAILERSEND_API_KEY,
+  EMAIL_FROM,
   EMAIL_TO
 } = process.env;
 
@@ -40,22 +40,34 @@ function required(name: string, val: string | undefined) {
 }
 
 async function sendEmail(subject: string, text: string, attachments: { filename: string; path: string }[] = []) {
-  sgMail.setApiKey(required('SENDGRID_API_KEY', SENDGRID_API_KEY));
+  const mailerSend = new MailerSend({ apiKey: required('MAILERSEND_API_KEY', MAILERSEND_API_KEY) });
 
-  const formattedAttachments = attachments.map(({ filename, path: filePath }) => ({
+  const formattedAttachments: Array<{
+    content: string;
+    filename: string;
+    type: 'application/octet-stream';
+    disposition: 'attachment' | 'inline';
+  }> = attachments.map(({ filename, path: filePath }) => ({
     content: fs.readFileSync(filePath).toString('base64'),
     filename,
     type: 'application/octet-stream',
     disposition: 'attachment'
   }));
 
-  await sgMail.send({
-    to: required('EMAIL_TO', EMAIL_TO),
-    from: required('SENDGRID_FROM', SENDGRID_FROM),
-    subject,
-    text,
-    attachments: formattedAttachments
-  });
+  const sentFrom = new Sender(required('EMAIL_FROM', EMAIL_FROM), "Irvine Propane Tracker");
+  const recipients = [new Recipient(required('EMAIL_TO', EMAIL_TO))];
+
+  const attachmentsList = formattedAttachments
+    .map(att => new Attachment(att.content, att.filename, att.disposition));
+
+  const emailParams = new EmailParams()
+    .setFrom(sentFrom)
+    .setTo(recipients)
+    .setSubject(subject)
+    .setText(text)
+    .setAttachments(attachmentsList ? attachmentsList : []);
+
+  await mailerSend.email.send(emailParams);
 }
 
 function extractSnippet(source: string, marker: string): string {

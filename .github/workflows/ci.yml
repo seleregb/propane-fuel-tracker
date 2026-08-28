@@ -39,8 +39,8 @@ jobs:
           REFILL_BUTTON_SELECTOR: ${{ vars.REFILL_BUTTON_SELECTOR }}
           REFILL_CONFIRM_SELECTOR: ${{ vars.REFILL_CONFIRM_SELECTOR }}
 
-          SENDGRID_API_KEY: ${{ secrets.SENDGRID_API_KEY }}
-          SENDGRID_FROM: ${{ vars.SENDGRID_FROM }}
+          MAILERSEND_API_KEY: ${{ secrets.MAILERSEND_API_KEY }}
+          EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
 
         run: |
