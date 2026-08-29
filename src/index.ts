@@ -54,7 +54,7 @@ async function sendEmail(subject: string, text: string, attachments: { filename:
     disposition: 'attachment'
   }));
 
-  const sentFrom = new Sender(required('EMAIL_FROM', EMAIL_FROM), "Irvine Propane Tracker");
+  const sentFrom = new Sender(required('EMAIL_FROM', EMAIL_FROM), "Irving Propane Tracker");
   const recipients = [new Recipient(required('EMAIL_TO', EMAIL_TO))];
 
   const attachmentsList = formattedAttachments
