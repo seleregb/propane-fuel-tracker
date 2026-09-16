@@ -25,7 +25,6 @@ const {
   TANK_THRESHOLD,
   EMAIL_TO,
   SMTP_HOST,
-  SMTP_PORT,
   SMTP_USER,
   SMTP_PASS
 } = process.env;
@@ -39,15 +38,9 @@ function required(name: string, val: string | undefined) {
 }
 
 async function sendEmail(subject: string, text: string, attachments: { filename: string; path: string }[] = []) {
-  const smtpPort = Number.parseInt(SMTP_PORT ?? "", 10);
-
-  if (!Number.isInteger(smtpPort)) {
-    throw new Error("SMTP_PORT must be a valid integer");
-  }
-  
   const transporter = nodemailer.createTransport({
     host: SMTP_HOST,
-    port: smtpPort,
+    port: 587,
     secure: false, // use STARTTLS (upgrade connection to TLS after connecting)
     auth: {
       user: SMTP_USER,
