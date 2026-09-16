@@ -1,9 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
-import { MailerSend, EmailParams, Sender, Recipient, Attachment } from "mailersend";
-import { chromium, Locator } from 'playwright';
-import { expect } from 'playwright/test';
+import { chromium } from 'playwright';
+import nodemailer from 'nodemailer';
 
 const envCandidates = [
   path.resolve(__dirname, '..', '.env'),
@@ -24,11 +23,11 @@ const {
   LOGIN_SUBMIT_SELECTOR,
   TANK_LEVEL_SELECTOR,
   TANK_THRESHOLD,
-  REFILL_BUTTON_SELECTOR,
-  REFILL_CONFIRM_SELECTOR,
-  MAILERSEND_API_KEY,
-  EMAIL_FROM,
-  EMAIL_TO
+  EMAIL_TO,
+  SMTP_HOST,
+  SMTP_PORT,
+  SMTP_USER,
+  SMTP_PASS
 } = process.env;
 
 function required(name: string, val: string | undefined) {
@@ -40,34 +39,40 @@ function required(name: string, val: string | undefined) {
 }
 
 async function sendEmail(subject: string, text: string, attachments: { filename: string; path: string }[] = []) {
-  const mailerSend = new MailerSend({ apiKey: required('MAILERSEND_API_KEY', MAILERSEND_API_KEY) });
+  const smtpPort = Number.parseInt(SMTP_PORT ?? "", 10);
 
-  const formattedAttachments: Array<{
-    content: string;
-    filename: string;
-    type: 'application/octet-stream';
-    disposition: 'attachment' | 'inline';
-  }> = attachments.map(({ filename, path: filePath }) => ({
-    content: fs.readFileSync(filePath).toString('base64'),
-    filename,
-    type: 'application/octet-stream',
-    disposition: 'attachment'
-  }));
+  if (!Number.isInteger(smtpPort)) {
+    throw new Error("SMTP_PORT must be a valid integer");
+  }
+  
+  const transporter = nodemailer.createTransport({
+    host: SMTP_HOST,
+    port: smtpPort,
+    secure: false, // use STARTTLS (upgrade connection to TLS after connecting)
+    auth: {
+      user: SMTP_USER,
+      pass: SMTP_PASS,
+    },
+  });
 
-  const sentFrom = new Sender(required('EMAIL_FROM', EMAIL_FROM), "Irving Propane Tracker");
-  const recipients = [new Recipient(required('EMAIL_TO', EMAIL_TO))];
+  try {
+    await transporter.verify();
+    console.log("Server is ready to take our messages");
+  } catch (err) {
+    console.error("Verification failed:", err);
+  }
 
-  const attachmentsList = formattedAttachments
-    .map(att => new Attachment(att.content, att.filename, att.disposition));
-
-  const emailParams = new EmailParams()
-    .setFrom(sentFrom)
-    .setTo(recipients)
-    .setSubject(subject)
-    .setText(text)
-    .setAttachments(attachmentsList ? attachmentsList : []);
-
-  await mailerSend.email.send(emailParams);
+  await transporter.sendMail({
+    from: `Propane Tracker <${SMTP_USER}>`, // sender address
+    to: required('EMAIL_TO', EMAIL_TO), // list of recipients
+    subject: subject, // subject line
+    text: text, // plain text body,
+    attachments: attachments.map(({ filename, path: filePath }) => ({
+      filename,
+      path: filePath,
+      contentType: 'application/octet-stream'
+    }))
+  });
 }
 
 function extractSnippet(source: string, marker: string): string {
