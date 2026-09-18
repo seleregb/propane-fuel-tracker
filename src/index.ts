@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import dotenv from 'dotenv';
 import { chromium } from 'playwright';
-import nodemailer from 'nodemailer';
+import { BrevoClient } from '@getbrevo/brevo';
 
 const envCandidates = [
   path.resolve(__dirname, '..', '.env'),
@@ -23,10 +23,12 @@ const {
   LOGIN_SUBMIT_SELECTOR,
   TANK_LEVEL_SELECTOR,
   TANK_THRESHOLD,
+  EMAIL_FROM,
   EMAIL_TO,
   SMTP_HOST,
   SMTP_USER,
-  SMTP_PASS
+  SMTP_PASS,
+  BREVO_API_KEY
 } = process.env;
 
 function required(name: string, val: string | undefined) {
@@ -38,34 +40,19 @@ function required(name: string, val: string | undefined) {
 }
 
 async function sendEmail(subject: string, text: string, attachments: { filename: string; path: string }[] = []) {
-  const transporter = nodemailer.createTransport({
-    host: SMTP_HOST,
-    port: 587,
-    secure: false, // use STARTTLS (upgrade connection to TLS after connecting)
-    auth: {
-      user: SMTP_USER,
-      pass: SMTP_PASS,
-    },
-  });
-
-  try {
-    await transporter.verify();
-    console.log("Server is ready to take our messages");
-  } catch (err) {
-    console.error("Verification failed:", err);
-  }
-
-  await transporter.sendMail({
-    from: `Propane Tracker <${SMTP_USER}>`, // sender address
-    to: required('EMAIL_TO', EMAIL_TO), // list of recipients
-    subject: subject, // subject line
-    text: text, // plain text body,
-    attachments: attachments.map(({ filename, path: filePath }) => ({
-      filename,
-      path: filePath,
-      contentType: 'application/octet-stream'
+  const brevo = new BrevoClient({ apiKey: BREVO_API_KEY || '' });
+  const result = await brevo.transactionalEmails.sendTransacEmail({
+    subject: subject,
+    htmlContent: `<p>${text.replace(/\n/g, '<br>')}</p>`,
+    sender: { name: 'Irving Propane Tracker', email: required('EMAIL_FROM', EMAIL_FROM) },
+    to: [{ email: required('EMAIL_TO', EMAIL_TO), name: 'John Doe' }],
+    attachment: attachments.map(({ filename, path: filePath }) => ({
+      name: filename,
+      content: fs.readFileSync(filePath).toString('base64'),
+      type: 'application/octet-stream'
     }))
   });
+  console.log('Email sent. Message ID:', result.messageId);
 }
 
 function extractSnippet(source: string, marker: string): string {
