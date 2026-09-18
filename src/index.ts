@@ -25,9 +25,6 @@ const {
   TANK_THRESHOLD,
   EMAIL_FROM,
   EMAIL_TO,
-  SMTP_HOST,
-  SMTP_USER,
-  SMTP_PASS,
   BREVO_API_KEY
 } = process.env;
 
@@ -40,7 +37,10 @@ function required(name: string, val: string | undefined) {
 }
 
 async function sendEmail(subject: string, text: string, attachments: { filename: string; path: string }[] = []) {
-  const brevo = new BrevoClient({ apiKey: BREVO_API_KEY || '' });
+  const brevo = new BrevoClient({ 
+    apiKey: required('BREVO_API_KEY', BREVO_API_KEY),
+    maxRetries: 3,
+   });
   const result = await brevo.transactionalEmails.sendTransacEmail({
     subject: subject,
     htmlContent: `<p>${text.replace(/\n/g, '<br>')}</p>`,
