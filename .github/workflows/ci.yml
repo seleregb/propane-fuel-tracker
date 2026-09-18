@@ -37,11 +37,9 @@ jobs:
           TANK_LEVEL_SELECTOR: ${{ vars.TANK_LEVEL_SELECTOR }}
           TANK_THRESHOLD: ${{ vars.TANK_THRESHOLD }}
           REFILL_BUTTON_SELECTOR: ${{ vars.REFILL_BUTTON_SELECTOR }}
-          REFILL_CONFIRM_SELECTOR: ${{ vars.REFILL_CONFIRM_SELECTOR }}
-
-          MAILERSEND_API_KEY: ${{ secrets.MAILERSEND_API_KEY }}
           EMAIL_FROM: ${{ vars.EMAIL_FROM }}
           EMAIL_TO: ${{ vars.EMAIL_TO }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
 
         run: |
           set -e
