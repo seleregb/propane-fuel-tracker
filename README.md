@@ -1,5 +1,7 @@
 Propane Fuel Tracker (Playwright + TypeScript)
 
+[![Propane Tracker CI](https://github.com/seleregb/propane-fuel-tracker/actions/workflows/ci.yml/badge.svg)](https://github.com/seleregb/propane-fuel-tracker/actions/workflows/ci.yml)
+
 Overview
 - Logs into propane provider site, checks tank level, requests refill when below threshold.
 - Sends email notifications on success, refill requested, or errors.
